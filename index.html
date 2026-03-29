@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LILA BLACK — Player Journey Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/heatmap.js@2.0.5/build/heatmap.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0d0d0d; color:#fff; font-family:sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+#top-bar { background:#111; padding:10px 16px; border-bottom:1px solid #333; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+#top-bar h1 { color:#f0a500; font-size:14px; min-width:120px; }
+.ctrl { display:flex; align-items:center; gap:6px; font-size:12px; color:#aaa; }
+.ctrl select { background:#2a2a2a; color:#fff; border:1px solid #444; padding:4px 8px; border-radius:4px; font-size:12px; }
+#content { display:flex; flex:1; overflow:hidden; }
+#sidebar { width:200px; background:#1a1a1a; padding:12px; overflow-y:auto; flex-shrink:0; border-right:1px solid #333; }
+#sidebar h3 { font-size:11px; color:#888; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; }
+.toggle { display:flex; align-items:center; gap:6px; font-size:12px; padding:3px 0; cursor:pointer; }
+.toggle input { cursor:pointer; }
+.dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+#stats { margin-top:16px; padding-top:12px; border-top:1px solid #333; font-size:11px; color:#888; line-height:2; }
+#stats span { color:#fff; }
+#main { flex:1; position:relative; display:flex; align-items:center; justify-content:center; background:#0d0d0d; }
+#map-container { position:relative; width:700px; height:700px; }
+#minimap { width:700px; height:700px; display:block; border-radius:4px; }
+#canvas { position:absolute; top:0; left:0; width:700px; height:700px; }
+#heatmap-container { position:absolute; top:0; left:0; width:700px; height:700px; pointer-events:none; border-radius:4px; }
+#timeline-bar { background:#111; border-top:1px solid #333; padding:8px 16px; display:flex; align-items:center; gap:12px; }
+#timeline-bar span { font-size:11px; color:#888; }
+#timeline { flex:1; accent-color:#f0a500; }
+#play-btn { background:#f0a500; color:#000; border:none; padding:5px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; white-space:nowrap; }
+#play-btn:hover { background:#ffc333; }
+#ts-label { font-size:11px; color:#aaa; min-width:70px; text-align:right; }
+</style>
+</head>
+<body>
+
+<div id="top-bar">
+  <h1>LILA BLACK<br><span style="color:#888;font-weight:normal">Level Design Tool</span></h1>
+  <div class="ctrl">
+    <span>Map</span>
+    <select id="map-select">
+      <option value="AmbroseValley">Ambrose Valley</option>
+      <option value="GrandRift">Grand Rift</option>
+      <option value="Lockdown">Lockdown</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <span>Day</span>
+    <select id="day-select">
+      <option value="all">All Days</option>
+      <option value="February_10">Feb 10</option>
+      <option value="February_11">Feb 11</option>
+      <option value="February_12">Feb 12</option>
+      <option value="February_13">Feb 13</option>
+      <option value="February_14">Feb 14</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <span>View</span>
+    <select id="mode-select">
+      <option value="dots">Player Journeys</option>
+      <option value="heatmap">Heatmap</option>
+    </select>
+  </div>
+</div>
+
+<div id="content">
+  <div id="sidebar">
+    <h3>Event Types</h3>
+    <label class="toggle"><input type="checkbox" checked data-event="Position"><span class="dot" style="background:#4a9eff"></span>Movement</label>
+    <label class="toggle"><input type="checkbox" checked data-event="BotPosition"><span class="dot" style="background:#555"></span>Bot Movement</label>
+    <label class="toggle"><input type="checkbox" checked data-event="Kill"><span class="dot" style="background:#ff4444"></span>Kill</label>
+    <label class="toggle"><input type="checkbox" checked data-event="Killed"><span class="dot" style="background:#ff8800"></span>Killed</label>
+    <label class="toggle"><input type="checkbox" checked data-event="BotKill"><span class="dot" style="background:#ff6666"></span>Bot Kill</label>
+    <label class="toggle"><input type="checkbox" checked data-event="BotKilled"><span class="dot" style="background:#ffaa44"></span>Bot Killed</label>
+    <label class="toggle"><input type="checkbox" checked data-event="KilledByStorm"><span class="dot" style="background:#aa44ff"></span>Storm Death</label>
+    <label class="toggle"><input type="checkbox" checked data-event="Loot"><span class="dot" style="background:#44ff88"></span>Loot</label>
+
+    <div id="stats">Loading...</div>
+  </div>
+
+  <div id="main">
+    <div id="map-container">
+      <img id="minimap" src="AmbroseValley_Minimap.png">
+      <div id="heatmap-container"></div>
+      <canvas id="canvas" width="700" height="700"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="timeline-bar">
+  <button id="play-btn">▶ Play</button>
+  <span>Timeline</span>
+  <input type="range" id="timeline" min="0" max="100" value="100">
+  <span id="ts-label">All time</span>
+</div>
+
+<script>
+const COLORS = {
+  Position:"#4a9eff", BotPosition:"#444444",
+  Kill:"#ff4444", Killed:"#ff8800",
+  BotKill:"#ff6666", BotKilled:"#ffaa44",
+  KilledByStorm:"#aa44ff", Loot:"#44ff88"
+};
+const SIZES = {
+  Position:2, BotPosition:2,
+  Kill:7, Killed:7,
+  BotKill:5, BotKilled:5,
+  KilledByStorm:8, Loot:5
+};
+const MAPS = {
+  AmbroseValley:"AmbroseValley_Minimap.png",
+  GrandRift:"GrandRift_Minimap.png",
+  Lockdown:"Lockdown_Minimap.jpg"
+};
+
+let allEvents = [];
+let heatmapInstance = null;
+let playing = false;
+let playInterval = null;
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const scale = 700/1024;
+
+fetch('events.json')
+  .then(r => r.json())
+  .then(data => {
+    allEvents = data;
+    initHeatmap();
+    render();
+  });
+
+function initHeatmap() {
+  document.getElementById('heatmap-container').innerHTML = '';
+  heatmapInstance = h337.create({
+    container: document.getElementById('heatmap-container'),
+    radius: 20, maxOpacity: 0.75,
+    minOpacity: 0, blur: 0.85
+  });
+}
+
+function getActiveEvents() {
+  const checked = [...document.querySelectorAll('[data-event]')]
+    .filter(c => c.checked).map(c => c.dataset.event);
+  const map = document.getElementById('map-select').value;
+  const day = document.getElementById('day-select').value;
+  const tval = parseInt(document.getElementById('timeline').value);
+  let filtered = allEvents.filter(e =>
+    e.map === map &&
+    (day === 'all' || e.day === day) &&
+    checked.includes(e.event)
+  );
+  if (tval < 100) {
+    const sorted = filtered.map(e => e.ts).sort();
+    const cutoff = sorted[Math.floor(sorted.length * tval / 100)];
+    filtered = filtered.filter(e => e.ts <= cutoff);
+    document.getElementById('ts-label').textContent = tval + '% of time';
+  } else {
+    document.getElementById('ts-label').textContent = 'All time';
+  }
+  return filtered;
+}
+
+function render() {
+  const events = getActiveEvents();
+  const mode = document.getElementById('mode-select').value;
+  ctx.clearRect(0,0,700,700);
+  if (mode === 'dots') {
+    if (heatmapInstance) heatmapInstance.setData({max:10, data:[]});
+    events.forEach(e => {
+      const px = e.x * scale;
+      const py = e.y * scale;
+      ctx.beginPath();
+      ctx.arc(px, py, SIZES[e.event]||3, 0, Math.PI*2);
+      ctx.fillStyle = COLORS[e.event]||'#fff';
+      ctx.globalAlpha = (e.event==='Position'||e.event==='BotPosition') ? 0.25 : 0.85;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  } else {
+    ctx.clearRect(0,0,700,700);
+    const hdata = events.map(e => ({
+      x: Math.round(e.x * scale),
+      y: Math.round(e.y * scale),
+      value: (e.event==='Kill'||e.event==='Killed'||e.event==='KilledByStorm') ? 3 : 1
+    }));
+    if (heatmapInstance) heatmapInstance.setData({max:10, data: hdata});
+  }
+  const combat = events.filter(e => ['Kill','Killed','BotKill','BotKilled'].includes(e.event)).length;
+  const storm = events.filter(e => e.event==='KilledByStorm').length;
+  const loot = events.filter(e => e.event==='Loot').length;
+  document.getElementById('stats').innerHTML =
+    `<b style="color:#f0a500">Events</b><br>
+     Total: <span>${events.length.toLocaleString()}</span><br>
+     Combat: <span>${combat.toLocaleString()}</span><br>
+     Storm deaths: <span>${storm}</span><br>
+     Loot pickups: <span>${loot}</span>`;
+}
+
+document.getElementById('map-select').addEventListener('change', () => {
+  document.getElementById('minimap').src = MAPS[document.getElementById('map-select').value];
+  render();
+});
+document.getElementById('day-select').addEventListener('change', render);
+document.getElementById('mode-select').addEventListener('change', render);
+document.getElementById('timeline').addEventListener('input', render);
+document.querySelectorAll('[data-event]').forEach(c => c.addEventListener('change', render));
+
+document.getElementById('play-btn').addEventListener('click', () => {
+  if (playing) {
+    clearInterval(playInterval);
+    playing = false;
+    document.getElementById('play-btn').textContent = '▶ Play';
+  } else {
+    playing = true;
+    document.getElementById('play-btn').textContent = '⏹ Stop';
+    let val = 0;
+    document.getElementById('timeline').value = 0;
+    playInterval = setInterval(() => {
+      val += 1;
+      document.getElementById('timeline').value = val;
+      render();
+      if (val >= 100) {
+        clearInterval(playInterval);
+        playing = false;
+        document.getElementById('play-btn').textContent = '▶ Play';
+      }
+    }, 120);
+  }
+});
+</script>
+</body>
+</html>
